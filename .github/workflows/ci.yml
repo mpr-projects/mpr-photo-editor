@@ -11,6 +11,8 @@ jobs:
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      PIP_CACHE_DIR: .pip_cache
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -23,10 +25,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set custom pip cache dir
+        run: mkdir -p ${{ env.PIP_CACHE_DIR }}
+        shell: bash
+
       - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
+          path: ${{ env.PIP_CACHE_DIR }}
           key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
@@ -46,7 +52,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install project with dev dependencies
-        run: pip install .[dev]
+        run: pip install --cache-dir ${{ env.PIP_CACHE_DIR }} .[dev]
 
       - name: Run mypy (type checks)
         run: mypy mpr_photo_editor tests
