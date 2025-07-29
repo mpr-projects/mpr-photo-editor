@@ -1,0 +1,43 @@
+[build-system]
+requires = ["maturin>=1.2"]
+build-backend = "maturin"
+
+[project]
+name = "mpr-photo-editor"
+version = "0.1.0"
+description = "Cross-platform photo editor using Dear PyGui and Rust"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name = "Michael Prasthofer", email = "michael.prasthofer@protonmail.com" }
+]
+dependencies = [
+    "dearpygui"
+]
+keywords = ["photo", "editor", "rust", "gui", "image-processing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Graphics :: Editors"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "maturin",
+    "mypy",
+    "ruff",
+    "pyo3-stubgen"
+]
+
+[tool.maturin]
+module-name = "mpr_photo_editor.rust_backend"
+python-source = "."
+
+[tool.mypy]
+[[tool.mypy.overrides]]
+module = "dearpygui.*"
+ignore_missing_imports = true
