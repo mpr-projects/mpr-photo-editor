@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QFrame, QSplitter
 )
 from PySide6.QtCore import Qt
-from mpr_photo_editor.backend import invert_image
+from mpr_photo_editor.backend import invert_image, get_libraw_version
 
 DEFAULT_WIDTH = 800
 DEFAULT_HEIGHT = 600
@@ -85,6 +85,13 @@ class MainWindow(QWidget):
         invert_button.clicked.connect(self.process_callback)
         left_layout.addWidget(invert_button)
 
+        version_button = QPushButton("Get LibRaw Version")
+        version_button.clicked.connect(self.show_libraw_version)
+        left_layout.addWidget(version_button)
+
+        self.version_label = QLabel("LibRaw version will be shown here.")
+        left_layout.addWidget(self.version_label)
+
         # Top right Panel
         right_panel = QFrame()
         right_panel.setFrameShape(QFrame.Shape.StyledPanel)
@@ -120,6 +127,11 @@ class MainWindow(QWidget):
         global image_data
         result = invert_image(image_data, 100, 100)
         print("Image processed. First 10 pixels:", result[:10])
+
+    def show_libraw_version(self):
+        """Gets the LibRaw version and displays it in the label."""
+        version = get_libraw_version()
+        self.version_label.setText(f"LibRaw Version: {version}")
 
 def main():
     app = QApplication(sys.argv)

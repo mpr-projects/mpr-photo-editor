@@ -2,6 +2,7 @@
 name = "mpr_photo_editor_rust"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
@@ -10,3 +11,9 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.20", features = ["extension-module"] }
 rayon = "1.10"
 ndarray = { version = "0.15", features = ["rayon"] }
+
+[build-dependencies]
+bindgen = "0.69"
+which = "4.4.2"
+autotools = "0.2"
+pkg-config = "0.3"

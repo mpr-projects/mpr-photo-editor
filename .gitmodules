@@ -1,0 +1,3 @@
+[submodule "rust/external/libraw"]
+	path = rust/external/libraw
+	url = https://github.com/LibRaw/LibRaw.git

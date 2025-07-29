@@ -24,13 +24,18 @@ classifiers = [
     "Topic :: Multimedia :: Graphics :: Editors"
 ]
 
+[project.scripts]
+mpr-photo-editor = "mpr_photo_editor.gui:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
     "maturin",
     "mypy",
     "ruff",
-    "pyo3-stubgen"
+    "pyo3-stubgen",
+    "delocate; sys_platform == 'darwin'",
+    "auditwheel; sys_platform == 'linux'"
 ]
 
 [tool.maturin]

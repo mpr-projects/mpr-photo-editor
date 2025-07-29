@@ -28,7 +28,7 @@ dist/
 
 ### Rust ###
 # Build artifacts from cargo/maturin
-/rust/target/
+build
 
 # rust stubs for python, these are recreated on build
 *.pyi
