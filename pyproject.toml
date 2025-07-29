@@ -5,14 +5,14 @@ build-backend = "maturin"
 [project]
 name = "mpr-photo-editor"
 version = "0.1.0"
-description = "Cross-platform photo editor using Dear PyGui and Rust"
+description = "A node-based cross-platform photo editor."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
     { name = "Michael Prasthofer", email = "michael.prasthofer@protonmail.com" }
 ]
 dependencies = [
-    "dearpygui"
+    "pyside6"
 ]
 keywords = ["photo", "editor", "rust", "gui", "image-processing"]
 classifiers = [
@@ -39,5 +39,5 @@ python-source = "."
 
 [tool.mypy]
 [[tool.mypy.overrides]]
-module = "dearpygui.*"
+module = "pyside6.*"
 ignore_missing_imports = true

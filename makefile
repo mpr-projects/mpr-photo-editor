@@ -1,6 +1,6 @@
-.PHONY: develop install test run clean
+.PHONY: develop install_dependencies test run clean check
 
-install:
+install_dependencies:
 	pip install .[dev]
 
 develop:
