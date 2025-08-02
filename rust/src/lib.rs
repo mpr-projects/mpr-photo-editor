@@ -19,11 +19,18 @@ fn invert_image(image: Vec<u8>, width: usize, height: usize) -> Vec<u8> {
 }
 
 /// Returns the version string from the linked LibRaw library.
+// #[pyfunction]
+// fn get_libraw_version() -> PyResult<String> {
+//     // C functions are `unsafe` to call from Rust.
+//     let version_cstr = unsafe { CStr::from_ptr(libraw_version()) };
+//     Ok(version_cstr.to_string_lossy().into_owned())
+// }
+
 #[pyfunction]
 fn get_libraw_version() -> PyResult<String> {
     // C functions are `unsafe` to call from Rust.
-    let version_cstr = unsafe { CStr::from_ptr(libraw_version()) };
-    Ok(version_cstr.to_string_lossy().into_owned())
+    let version_cstr = "version: n/a";
+    Ok(version_cstr.to_string().to_owned())
 }
 
 /// Python module definition

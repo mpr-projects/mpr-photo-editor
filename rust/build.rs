@@ -19,7 +19,6 @@ fn windows_link_libraw_pkg_config() -> String {
     println!("cargo:rustc-link-lib=dylib=raw");
 
     lib.include_paths[0]
-        .join("libraw/libraw.h")
         .display()
         .to_string()
 }
@@ -73,7 +72,8 @@ fn unix_build_libraw() -> String {
     }
 
     println!("cargo:rerun-if-changed=external/libraw/libraw/libraw.h");
-    "external/libraw/libraw/libraw.h".to_string()
+    // "external/libraw/libraw/libraw.h".to_string()
+    "external/libraw/".to_string()
 }
 
 fn generate_bindings(header_path: &str) {
@@ -96,6 +96,33 @@ fn generate_bindings(header_path: &str) {
         .expect("Couldn't write bindings!");
 }
 
+fn compile_libraw_wrapper(header_path: &str) {
+    // Tell cargo to rebuild if the wrapper changes
+    println!("cargo:rerun-if-changed=ffi/libraw_wrapper.hpp");
+
+    // Compile C++ wrapper
+    cc::Build::new()
+        .cpp(true)
+        .file("ffi/libraw_wrapper.cpp")
+        .include(header_path)
+        .include("ffi/")
+        .flag_if_supported("-std=c++11")
+        .compile("libraw_wrapper");
+
+    // Generate Rust bindings from the header
+    let bindings = bindgen::Builder::default()
+        .header("ffi/libraw_wrapper.hpp")
+        .clang_arg("-Iextern/libraw/") // Include LibRaw headers
+        .clang_arg("-Iffi/")           // Include our wrapper header
+        .generate()
+        .expect("Unable to generate bindings");
+
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    bindings
+        .write_to_file(out_path.join("bindings.rs"))
+        .expect("Couldn't write bindings!");
+}
+
 fn main() {
     let header_path = if cfg!(target_os = "windows") {
         // On Windows, we use vcpkg to find libraw (because compiling
@@ -108,5 +135,6 @@ fn main() {
         unix_build_libraw()
     };
 
-    generate_bindings(&header_path);
+    // generate_bindings(&header_path);
+    compile_libraw_wrapper(&header_path);
 }

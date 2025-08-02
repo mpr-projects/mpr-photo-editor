@@ -1,10 +1,19 @@
 import sys
-from PySide6.QtGui import QResizeEvent, QShowEvent
+from PySide6.QtGui import QResizeEvent, QShowEvent, QPainter, QPixmap, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
-    QHBoxLayout, QVBoxLayout, QFrame, QSplitter
+    QHBoxLayout, QVBoxLayout, QFrame, QSplitter,
+    QFileDialog
 )
 from PySide6.QtCore import Qt
+
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem
+from PySide6.QtGui import QColor, QPainter, QGuiApplication
+from PySide6.QtCore import QTimer
+
+import mpr_photo_editor.nodes as nodes
+import mpr_photo_editor.node_panels as node_panels
+import mpr_photo_editor.helper as helper
 from mpr_photo_editor.backend import invert_image, get_libraw_version
 
 DEFAULT_WIDTH = 800
@@ -13,6 +22,78 @@ DEFAULT_SIDEBAR_WIDTH = 250
 DEFAULT_NODEBAR_HEIGHT = 200
 
 image_data = [128] * (100 * 100)  # Dummy grayscale image
+
+class DraggableImage(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Set a default pixmap and store aspect ratio
+        pixmap = QPixmap(150, 100)  # Example default rectangle
+        pixmap.fill("gray")
+        self.setPixmap(pixmap)
+        self.aspect_ratio = pixmap.width() / pixmap.height()
+        self.setScaledContents(True)
+        self.setFixedSize(pixmap.size())
+        self.dragging = False
+        self.offset = None
+        self.setStyleSheet("border: 1px solid black;")
+        self.resizing = False
+        self.resize_margin = 10
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._in_resize_area(event.pos()):
+                self.resizing = True
+            else:
+                self.dragging = True
+                self.offset = event.pos()
+
+    def cursorUpdate(self, pos):
+        if self._in_resize_area(pos) or self.resizing:
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        self.cursorUpdate(event.pos())
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            if self.resizing:
+                width = max(20, event.pos().x())
+                height = max(20, int(width / self.aspect_ratio))
+                self.setFixedSize(width, height)
+            elif self.dragging and self.offset is not None:
+                new_pos = self.mapToParent(event.pos() - self.offset)
+                self.move(new_pos)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        self.dragging = False
+        self.resizing = False
+        self.offset = None
+
+    def enterEvent(self, event):
+        self.setStyleSheet("border: 1px solid blue;")
+
+    def leaveEvent(self, event):
+        self.setStyleSheet("border: 1px solid black;")
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _in_resize_area(self, pos):
+        return (
+            self.width() - self.resize_margin <= pos.x() <= self.width() and
+            self.height() - self.resize_margin <= pos.y() <= self.height()
+        )
+
+class ImageCanvas(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(400, 400)
+        self.setStyleSheet("background-color: white;")
+        self.setMouseTracking(True)
+
+    def add_image(self):
+        img = DraggableImage(self)
+        img.move(10, 10)
+        img.show()
 
 # Replace the splitter setup in init_ui with a subclass that locks the right panel
 class FixedRightSplitter(QSplitter):
@@ -66,6 +147,45 @@ class MainWindow(QWidget):
         self.setMinimumSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
         self.init_ui()
 
+    def init_ui_(self):
+        main_layout = QHBoxLayout(self)
+
+        scene = QGraphicsScene()
+        scene.setObjectName('The scene')
+        scene.setSceneRect(-50, -50, 1300, 1300)
+
+        rect = QGraphicsRectItem(10, 10, 700, 600)
+        rect.setBrush(QColor("blue"))
+        rect.setPen(Qt.PenStyle.NoPen)
+        scene.addItem(rect)
+
+        # pen = QPen(Qt.GlobalColor.yellow)
+        # brush = QBrush(Qt.GlobalColor.red)
+        # scene.addRect(10, 10, 700, 600, pen, brush)
+
+        def zoom_to_content():
+            print("View size:", view.viewport().size())
+            print("Scene rect:", scene.sceneRect())
+            print("Scene items bounding rect:", scene.itemsBoundingRect())
+            view.fitInView(scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+            view.centerOn(scene.itemsBoundingRect().center())
+
+        QTimer.singleShot(0, zoom_to_content)
+        
+        view = QGraphicsView(scene)
+        view.setStyleSheet("border: 2px solid red;")
+        view.resetTransform()
+        view.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+
+        main_layout.addWidget(view)
+        QTimer.singleShot(0, lambda: view.fitInView(scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio))
+        # view.fitInView(scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        # view.centerOn(500, 500)
+
+        print("Scene has items:", scene.items())
+        self.scene = scene
+        # self.view = view
+
     def init_ui(self):
         main_layout = QHBoxLayout(self)
 
@@ -77,28 +197,34 @@ class MainWindow(QWidget):
         left_panel = QFrame()
         left_panel.setFrameShape(QFrame.Shape.StyledPanel)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
-        self.left_label = QLabel("Left Panel")
-        left_layout.addWidget(self.left_label)
-
-        invert_button = QPushButton("Invert Image")
-        invert_button.clicked.connect(self.process_callback)
-        left_layout.addWidget(invert_button)
-
-        version_button = QPushButton("Get LibRaw Version")
-        version_button.clicked.connect(self.show_libraw_version)
-        left_layout.addWidget(version_button)
-
-        self.version_label = QLabel("LibRaw version will be shown here.")
-        left_layout.addWidget(self.version_label)
+        self.image_container = ImageCanvas(left_panel)
+        left_layout.addWidget(self.image_container, stretch=1)
 
         # Top right Panel
-        right_panel = QFrame()
+        self.right_panel = right_panel = QFrame()
         right_panel.setFrameShape(QFrame.Shape.StyledPanel)
         right_layout = QVBoxLayout(right_panel)
 
         self.right_label = QLabel("Right Panel (for node settings)")
         right_layout.addWidget(self.right_label)
+
+        load_button = QPushButton("Load Image")
+        load_button.clicked.connect(self.load_image)
+        right_layout.addWidget(load_button)
+
+        invert_button = QPushButton("Invert Image")
+        invert_button.clicked.connect(self.process_callback)
+        right_layout.addWidget(invert_button)
+
+        version_button = QPushButton("Get LibRaw Version")
+        version_button.clicked.connect(self.show_libraw_version)
+        right_layout.addWidget(version_button)
+
+        self.version_label = QLabel("LibRaw version will be shown here.")
+        right_layout.addWidget(self.version_label)
 
         horizontal_splitter.addWidget(left_panel)
         horizontal_splitter.addWidget(right_panel)
@@ -112,8 +238,31 @@ class MainWindow(QWidget):
         bottom_panel = QFrame()
         bottom_panel.setFrameShape(QFrame.Shape.StyledPanel)
         bottom_layout = QVBoxLayout(bottom_panel)
-        self.bottom_label = QLabel("Bottom Panel (for nodes)")
-        bottom_layout.addWidget(self.bottom_label)
+
+        self.node_scene = node_scene = nodes.NodeScene()
+        node_scene.node_selected.connect(self.update_right_panel)
+
+        node_view = nodes.NodeView(node_scene)
+        node_view.setStyleSheet("border: none;")
+        bottom_layout.addWidget(node_view)
+
+        screen_geometry = QGuiApplication.primaryScreen().availableGeometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
+        node_scene.setSceneRect(-screen_width*5, -screen_height*5, screen_width*10, screen_height*10)
+
+        node_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        node_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        node = nodes.NodeImageLoader()
+        node_scene.addItem(node)
+
+        QTimer.singleShot(0, lambda: node_view.centerOn(0, 0))
+        QTimer.singleShot(0, lambda: node.setPos(-node_view.viewport().width() / 2 + helper.dp(20),
+                                                -node.height / 2))
+
+        # helper.BackgroundRectHelper.initialize(node_scene)
+        # helper.BackgroundRectHelper.add_scene_background_rect()
 
         vertical_splitter.addWidget(horizontal_splitter)
         vertical_splitter.addWidget(bottom_panel)
@@ -122,6 +271,28 @@ class MainWindow(QWidget):
         vertical_splitter.setSizes([DEFAULT_HEIGHT - DEFAULT_NODEBAR_HEIGHT, DEFAULT_NODEBAR_HEIGHT])
 
         main_layout.addWidget(vertical_splitter)
+
+    def load_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open RAW Image",
+            "",
+            "RAW Images (*.cr2 *.nef *.arw *.dng *.rw2 *.orf *.raf *.srw *.pef);;All Files (*)"
+        )
+        if file_path:
+            self.image_container.add_image()
+
+    def update_right_panel(self, node):
+        print("update_right_panel called with:", node)
+        # clear old panel
+        for i in reversed(range(self.right_panel.layout().count())):
+            widget = self.right_panel.layout().itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        if node:
+            panel = node_panels.get_node_panel(node)
+            self.right_panel.layout().addWidget(panel)
 
     def process_callback(self):
         global image_data
@@ -133,8 +304,11 @@ class MainWindow(QWidget):
         version = get_libraw_version()
         self.version_label.setText(f"LibRaw Version: {version}")
 
+
 def main():
     app = QApplication(sys.argv)
+    helper._DPIHelper.initialize(app)
+
     window = MainWindow()
     window.showMaximized()
     sys.exit(app.exec())

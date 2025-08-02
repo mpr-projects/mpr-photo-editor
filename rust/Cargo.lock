@@ -254,6 +254,7 @@ version = "0.1.0"
 dependencies = [
  "autotools",
  "bindgen",
+ "cc",
  "ndarray",
  "pkg-config",
  "pyo3",
