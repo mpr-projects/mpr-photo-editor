@@ -1,10 +1,15 @@
+from __future__ import annotations
 import os
+from typing import cast, Optional
 
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem, QGraphicsRectItem, QGraphicsSceneMouseEvent, QGraphicsTextItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QFileDialog, QPushButton, QGraphicsProxyWidget, QMenu, QGraphicsSceneContextMenuEvent
 from PySide6.QtGui import QPainterPath, QPen, QColor, QPainter, QBrush, QTransform, QCursor
 from PySide6.QtCore import QRectF, QPointF, Qt, QEvent, Signal
 
-from mpr_photo_editor.helper import dp, BackgroundRectHelper
+from mpr_photo_editor.controller import Controller
+from mpr_photo_editor.model import Model
+from mpr_photo_editor.helper import dp
+# from mpr_photo_editor.helper import BackgroundRectHelper
 
 
 # Type categories
@@ -41,6 +46,7 @@ class NodeSocket:
         self.is_input = is_input
         self.socket_type = socket_type
         self.connections = []
+        self.name = ""
     
     def update_connections(self):
         for connection in self.connections:
@@ -53,6 +59,11 @@ class NodeSocket:
     def remove_connection(self, connection):
         if connection in self.connections:
             self.connections.remove(connection)
+
+    def get_parent_node(self) -> NodeBase:
+        """A type-hinted helper to get the parent item as a NodeBase."""
+        # This method is called on subclasses that are QGraphicsItems.
+        return cast(NodeBase, self.parentItem())  # type: ignore
 
 
 class SingleConnectionNodeSocket(NodeSocket, QGraphicsEllipseItem):
@@ -69,7 +80,7 @@ class SingleConnectionNodeSocket(NodeSocket, QGraphicsEllipseItem):
         if len(self.connections) > 0:
             self.connections[0].delete()
         self.connections.append(connection)
-        
+
 
 class MultiConnectionNodeSocket(NodeSocket, QGraphicsRectItem):
     def __init__(self, x, y, is_input=True, socket_type=SocketType.IMAGE, parent=None):
@@ -93,6 +104,8 @@ class NodeBase(QGraphicsItem):
         self.name = name
         self.width = width
         self.height = height
+        self.node_id: Optional[str] = None
+        self._drag_start_pos: Optional[QPointF] = None
 
         self.inputs = []
         self.outputs = []
@@ -134,6 +147,14 @@ class NodeBase(QGraphicsItem):
             (self.title_height - title_height) / 2
         )
 
+    def get_scene(self) -> NodeScene:
+        """A type-hinted helper to get the scene as a NodeScene."""
+        return cast(NodeScene, self.scene())
+
+    def on_setting_changed(self, node_id: str, key: str, value: object):
+        """Virtual method to allow subclasses to react to setting changes"""
+        pass
+
     def boundingRect(self):
         return QRectF(0, 0, self.width, self.height)
 
@@ -170,6 +191,7 @@ class NodeBase(QGraphicsItem):
         self.output_labels.append(label)
 
         socket = NodeSocketFactory(0, y, is_input=True, socket_type=socket_type, parent=self, single_connection=single_connection)
+        socket.name = f"{label_text}_in"
         self.inputs.append(socket)
 
     def add_output(self, socket_type, label_text, y_offset=None):
@@ -187,6 +209,7 @@ class NodeBase(QGraphicsItem):
         self.output_labels.append(label)
 
         socket = NodeSocketFactory(self.width, y, is_input=False, socket_type=socket_type, parent=self, single_connection=False)
+        socket.name = f"{label_text}_out"
         self.outputs.append(socket)
 
     def add_input_output(self, socket_type, label_text, y_offset=None, single_connection=True):
@@ -204,23 +227,42 @@ class NodeBase(QGraphicsItem):
         self.output_labels.append(label)
 
         socket = NodeSocketFactory(0, y, is_input=True, socket_type=socket_type, parent=self, single_connection=single_connection)
+        socket.name = f"{label_text}_in"
         self.inputs.append(socket)
 
         socket = NodeSocketFactory(self.width, y, is_input=False, socket_type=socket_type, parent=self, single_connection=False)
+        socket.name = f"{label_text}_out"
         self.outputs.append(socket)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        if getattr(self.scene(), "socket_active", False):
+        if self.get_scene().socket_active:
             event.ignore()
-        else:
-            return super().mousePressEvent(event)
+            return
+
+        # Store starting position for a potential move command
+        self._drag_start_pos = self.pos()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if self._drag_start_pos is not None:
+            current_pos = self.pos()
+            # Only create a command if the position has actually changed.
+            if current_pos != self._drag_start_pos:
+                if self.node_id:
+                    self.get_scene().controller.move_node(
+                        node_id=self.node_id,
+                        end_pos=current_pos,
+                        start_pos=self._drag_start_pos
+                    )
+            self._drag_start_pos = None
         
     def contextMenuEvent(self, event):
         menu = QMenu()
         delete_action = menu.addAction("Delete Node")
         action = menu.exec(event.screenPos())
-        if action == delete_action:
-            self.delete_node()
+        if action == delete_action and self.node_id:
+            self.get_scene().controller.remove_node(self.node_id)
 
     def delete_node(self):
         for socket in self.inputs + self.outputs:
@@ -283,8 +325,15 @@ class NodeImageLoader(NodeBase):
             None, "Select Image File", "",
             "Raw Images (*.cr2 *.nef *.arw *.dng *.rw2 *.orf *.raf *.srw *.pef);;All Files (*)")
 
-        if file_path:
-            file_name = os.path.basename(file_path)
+        if file_path and self.node_id:
+            self.get_scene().controller.update_node_setting(self.node_id, "filepath", file_path)
+
+    def on_setting_changed(self, node_id: str, key: str, value: object):
+        if self.node_id == node_id and key == "filepath":
+            if value:
+                file_name = os.path.basename(str(value))
+            else:
+                file_name = "No file selected"
             self.file_label.setPlainText(file_name)
 
 
@@ -308,6 +357,7 @@ class NodeConnection(QGraphicsPathItem):
         self.start_socket = start_socket
         self.end_socket = end_socket
         blended_color = self.blend_color(self.start_socket.brush().color(), QColor("gray"), 0.5)
+        self.conn_data: Optional[dict] = None
         self.setPen(QPen(blended_color, 2))
         self.update_path()
         self.setZValue(-1)
@@ -353,11 +403,28 @@ class NodeConnection(QGraphicsPathItem):
 class NodeScene(QGraphicsScene):
     node_selected = Signal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, controller: Controller, model: Model, parent=None):
         super().__init__(parent)
+        self.controller = controller
+        self.model = model
+
         self.temp_connection = None
         self.start_socket = None
         self.socket_active = False
+
+        # Store a map from model ID to the QGraphicsItem. This will be used
+        # to create and delete UI nodes when the model changes.
+        self.node_items: dict[str, NodeBase] = {}
+
+        # A map from connection data to the QGraphicsPathItem for easy removal.
+        self.connection_items: dict[frozenset, NodeConnection] = {}
+
+        # Connect to model signals to make the UI data-driven
+        self.model.node_added.connect(self.on_node_added)
+        self.model.node_removed.connect(self.on_node_removed)
+        self.model.connection_added.connect(self.on_connection_added)
+        self.model.connection_removed.connect(self.on_connection_removed)
+        self.model.node_position_changed.connect(self.on_node_position_changed)
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.scenePos(), QTransform())
@@ -407,11 +474,18 @@ class NodeScene(QGraphicsScene):
                     self.start_socket.is_input != end_item.is_input and
                     self.start_socket.parentItem() != end_item.parentItem()
                 ):
-                    connection = NodeConnection(self.start_socket, end_item)
-                    self.addItem(connection)
-                    connection.on_added_to_scene()
-                    self.start_socket.add_connection(connection)
-                    end_item.add_connection(connection)
+                    # Determine which socket is the output (from) and which is the input (to)
+                    from_socket = self.start_socket if not self.start_socket.is_input else end_item
+                    to_socket = end_item if end_item.is_input else self.start_socket
+
+                    from_node = from_socket.get_parent_node()
+                    to_node = to_socket.get_parent_node()
+
+                    if from_node.node_id and to_node.node_id:
+                        self.controller.add_connection(
+                            from_node=from_node.node_id, from_socket=from_socket.name,
+                            to_node=to_node.node_id, to_socket=to_socket.name
+                        )
             self.removeItem(self.temp_connection)
             self.temp_connection = None
             self.start_socket = None
@@ -445,24 +519,90 @@ class NodeScene(QGraphicsScene):
         add_loader_action = menu.addAction("Load Image Node")
         add_black_action = menu.addAction("Black Levels Node")
 
-        action = menu.exec(event.screenPos())
-        scene_pos = event.scenePos()
+        add_loader_action.triggered.connect(lambda: self.controller.add_node("ImageLoader", event.scenePos()))
+        add_black_action.triggered.connect(lambda: self.controller.add_node("BlackLevels", event.scenePos()))
+        menu.exec(event.screenPos())
 
-        if action == add_loader_action:
-            node = NodeImageLoader()
-            node.setPos(scene_pos)
-            self.addItem(node)
+    def on_connection_added(self, conn_data: dict):
+        """Slot to handle when a connection is added to the model."""
+        from_node_id = conn_data["from_node"]
+        from_socket_name = conn_data["from_socket"]
+        to_node_id = conn_data["to_node"]
+        to_socket_name = conn_data["to_socket"]
 
-        elif action == add_black_action:
-            node = NodeBlackLevels()
-            node.setPos(scene_pos)
-            self.addItem(node)
+        if from_node_id in self.node_items and to_node_id in self.node_items:
+            from_node = self.node_items[from_node_id]
+            to_node = self.node_items[to_node_id]
+
+            start_socket = next((s for s in from_node.outputs if s.name == from_socket_name), None)
+            end_socket = next((s for s in to_node.inputs if s.name == to_socket_name), None)
+
+            if start_socket and end_socket:
+                connection = NodeConnection(start_socket, end_socket)
+                self.addItem(connection)
+                connection.on_added_to_scene()
+                start_socket.add_connection(connection)
+                end_socket.add_connection(connection)
+
+                # Store for later removal
+                key = frozenset(conn_data.items())
+                connection.conn_data = conn_data
+                self.connection_items[key] = connection
+
+    def on_node_position_changed(self, node_id: str, position: QPointF):
+        """Slot to handle when a node's position changes in the model."""
+        if node_id in self.node_items:
+            node_item = self.node_items[node_id]
+            node_item.setPos(position)
+
+    def on_connection_removed(self, conn_data: dict):
+        """Slot to handle when a connection is removed from the model."""
+        key = frozenset(conn_data.items())
+        if key in self.connection_items:
+            connection = self.connection_items.pop(key)
+            connection.delete()
+
+    def on_node_added(self, node_id: str):
+        """Slot to handle when a node is added to the model."""
+        node_data = self.model.nodes[node_id]
+        node_type = node_data["type"]
+        position = QPointF(*node_data["position"])
+
+        # This will be replaced by the node registry later.
+        node_class = {"ImageLoader": NodeImageLoader, "BlackLevels": NodeBlackLevels}.get(node_type)
+
+        if node_class:
+            node_item = node_class()
+            node_item.node_id = node_id
+            node_item.setPos(position)
+            self.addItem(node_item)
+            self.node_items[node_id] = node_item
+            self.model.node_setting_changed.connect(node_item.on_setting_changed)
+            
+            for key, value in node_data.get("settings", {}).items():
+                node_item.on_setting_changed(node_id, key, value)
+
+    def on_node_removed(self, node_id: str):
+        """Slot to handle when a node is removed from the model."""
+        if node_id in self.node_items:
+            node_item = self.node_items.pop(node_id)
+
+            # Check if the item to be removed is currently selected.
+            is_selected = node_item.isSelected()
+
+            self.model.node_setting_changed.disconnect(node_item.on_setting_changed)
+            node_item.delete_node()  # Use the node's own cleanup method
+
+            # If the deleted node was selected, clear the side panel.
+            if is_selected:
+                self.node_selected.emit(None)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_X:
             for item in self.selectedItems():
                 if isinstance(item, NodeConnection):
-                    item.delete()
+                    if item.conn_data:
+                        self.controller.remove_connection(item.conn_data)
         else:
             super().keyPressEvent(event)
 
@@ -528,16 +668,19 @@ class NodeView(QGraphicsView):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_A and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            cursor_pos = QCursor.pos()  # Global screen position
-            scene_pos = self.mapToScene(self.mapFromGlobal(cursor_pos))  # Convert to scene coords
+            # Only trigger the context menu if the mouse is over this view.
+            if self.underMouse():
+                cursor_pos = QCursor.pos()  # Global screen position
+                scene_pos = self.mapToScene(self.mapFromGlobal(cursor_pos))  # Convert to scene coords
 
-            context_event = QGraphicsSceneContextMenuEvent(QEvent.Type.GraphicsSceneContextMenu)
-            context_event.setScenePos(scene_pos)
-            context_event.setScreenPos(cursor_pos)
-            context_event.setModifiers(Qt.KeyboardModifier.NoModifier)
+                context_event = QGraphicsSceneContextMenuEvent(QEvent.Type.GraphicsSceneContextMenu)
+                context_event.setScenePos(scene_pos)
+                context_event.setScreenPos(cursor_pos)
+                context_event.setModifiers(Qt.KeyboardModifier.NoModifier)
 
-            self.scene().contextMenuEvent(context_event)
-            event.accept()
-            
+                self.scene().contextMenuEvent(context_event)
+                event.accept()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

@@ -1,19 +1,26 @@
 import sys
-from PySide6.QtGui import QResizeEvent, QShowEvent, QPainter, QPixmap, QMouseEvent
+
+from PySide6.QtGui import (
+    QResizeEvent, QShowEvent, QPainter, QPixmap,
+    QMouseEvent, QKeySequence, QColor, QGuiApplication
+)
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
     QHBoxLayout, QVBoxLayout, QFrame, QSplitter,
-    QFileDialog
+    QFileDialog, QMenuBar
 )
+
 from PySide6.QtCore import Qt
 
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem
-from PySide6.QtGui import QColor, QPainter, QGuiApplication
 from PySide6.QtCore import QTimer
 
 import mpr_photo_editor.nodes as nodes
 import mpr_photo_editor.node_panels as node_panels
 import mpr_photo_editor.helper as helper
+from mpr_photo_editor.model import Model
+from mpr_photo_editor.controller import Controller
 from mpr_photo_editor.backend import invert_image, get_libraw_version
 
 DEFAULT_WIDTH = 800
@@ -145,6 +152,11 @@ class MainWindow(QWidget):
         super().__init__()
         self.setWindowTitle("Photo Editor - by mpr")
         self.setMinimumSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+
+        # Create the Model and Controller
+        self.model = Model()
+        self.controller = Controller(self.model)
+
         self.init_ui()
 
     def init_ui_(self):
@@ -187,7 +199,30 @@ class MainWindow(QWidget):
         # self.view = view
 
     def init_ui(self):
-        main_layout = QHBoxLayout(self)
+        # The main layout is now vertical to accommodate the menu bar at the top.
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # --- Menu Bar ---
+        menu_bar = QMenuBar()
+
+        # File Menu
+        file_menu = menu_bar.addMenu("&File")
+        file_menu.addAction("New... (placeholder)")
+
+        # Edit Menu
+        edit_menu = menu_bar.addMenu("&Edit")
+        undo_action = self.controller.undo_stack.createUndoAction(self, "&Undo")
+        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+
+        redo_action = self.controller.undo_stack.createRedoAction(self, "&Redo")
+        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+
+        edit_menu.addAction(undo_action)
+        edit_menu.addAction(redo_action)
+
+        main_layout.addWidget(menu_bar)
 
         # fix width/height of right and bottom bars while allowing user to change them
         vertical_splitter = FixedBottomSplitter(Qt.Orientation.Vertical)
@@ -239,7 +274,7 @@ class MainWindow(QWidget):
         bottom_panel.setFrameShape(QFrame.Shape.StyledPanel)
         bottom_layout = QVBoxLayout(bottom_panel)
 
-        self.node_scene = node_scene = nodes.NodeScene()
+        self.node_scene = node_scene = nodes.NodeScene(self.controller, self.model)
         node_scene.node_selected.connect(self.update_right_panel)
 
         node_view = nodes.NodeView(node_scene)
@@ -254,12 +289,12 @@ class MainWindow(QWidget):
         node_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         node_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        node = nodes.NodeImageLoader()
-        node_scene.addItem(node)
+        # node = nodes.NodeImageLoader()
+        # node_scene.addItem(node)
 
-        QTimer.singleShot(0, lambda: node_view.centerOn(0, 0))
-        QTimer.singleShot(0, lambda: node.setPos(-node_view.viewport().width() / 2 + helper.dp(20),
-                                                -node.height / 2))
+        # QTimer.singleShot(0, lambda: node_view.centerOn(0, 0))
+        # QTimer.singleShot(0, lambda: node.setPos(-node_view.viewport().width() / 2 + helper.dp(20),
+        #                                         -node.height / 2))
 
         # helper.BackgroundRectHelper.initialize(node_scene)
         # helper.BackgroundRectHelper.add_scene_background_rect()
@@ -284,15 +319,23 @@ class MainWindow(QWidget):
 
     def update_right_panel(self, node):
         print("update_right_panel called with:", node)
-        # clear old panel
-        for i in reversed(range(self.right_panel.layout().count())):
-            widget = self.right_panel.layout().itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
 
-        if node:
-            panel = node_panels.get_node_panel(node)
-            self.right_panel.layout().addWidget(panel)
+        layout = self.right_panel.layout()
+        if not layout:
+            # This should not happen if init_ui is correct, but it's a safe guard.
+            return
+
+        # Clear old panel widgets more robustly.
+        # This is the idiomatic way to clear a layout in Qt.
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        if node and node.node_id:
+            # Pass the node_id, model, and controller to create a data-driven panel
+            panel = node_panels.get_node_panel(node.node_id, self.model, self.controller)
+            layout.addWidget(panel)
 
     def process_callback(self):
         global image_data
