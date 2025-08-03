@@ -1,10 +1,11 @@
 import sys
+import os
+from typing import Optional
 
 from PySide6.QtGui import (
     QResizeEvent, QShowEvent, QPainter, QPixmap,
-    QMouseEvent, QKeySequence, QColor, QGuiApplication
+    QMouseEvent, QKeySequence, QColor, QGuiApplication, QAction
 )
-
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
     QHBoxLayout, QVBoxLayout, QFrame, QSplitter,
@@ -17,11 +18,11 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsRectItem
 from PySide6.QtCore import QTimer
 
 import mpr_photo_editor.nodes as nodes
-import mpr_photo_editor.node_panels as node_panels
 import mpr_photo_editor.helper as helper
+from mpr_photo_editor.node_panels import DefaultPanel, get_node_panel
 from mpr_photo_editor.model import Model
 from mpr_photo_editor.controller import Controller
-from mpr_photo_editor.backend import invert_image, get_libraw_version
+from mpr_photo_editor.backend import get_libraw_version
 
 DEFAULT_WIDTH = 800
 DEFAULT_HEIGHT = 600
@@ -150,12 +151,18 @@ class FixedBottomSplitter(QSplitter):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Photo Editor - by mpr")
+        self.setWindowTitle("Photo Editor - Untitled")
         self.setMinimumSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
 
         # Create the Model and Controller
         self.model = Model()
         self.controller = Controller(self.model)
+        self.current_filepath: Optional[str] = None
+        self.selected_node_id: Optional[str] = None
+
+        # Cache for node settings panels to avoid recreating them
+        self.panel_cache: dict[str, QWidget] = {}
+        self.current_panel: Optional[QWidget] = None
 
         self.init_ui()
 
@@ -198,21 +205,36 @@ class MainWindow(QWidget):
         self.scene = scene
         # self.view = view
 
-    def init_ui(self):
-        # The main layout is now vertical to accommodate the menu bar at the top.
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # --- Menu Bar ---
+    def _create_menu_bar(self) -> QMenuBar:
+        """Creates and configures the main menu bar."""
         menu_bar = QMenuBar()
 
         # File Menu
         file_menu = menu_bar.addMenu("&File")
-        file_menu.addAction("New... (placeholder)")
+
+        save_action = file_menu.addAction("&Save")
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self.save_project)
+
+        save_as_action = file_menu.addAction("Save &As...")
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.triggered.connect(self.save_project_as)
+
+        file_menu.addSeparator()
+
+        open_action = file_menu.addAction("&Open")
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self.open_project)
+
+        file_menu.addSeparator()
+
+        exit_action = file_menu.addAction("E&xit")
+        exit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        exit_action.triggered.connect(self.close)
 
         # Edit Menu
         edit_menu = menu_bar.addMenu("&Edit")
+
         undo_action = self.controller.undo_stack.createUndoAction(self, "&Undo")
         undo_action.setShortcut(QKeySequence.StandardKey.Undo)
 
@@ -222,6 +244,16 @@ class MainWindow(QWidget):
         edit_menu.addAction(undo_action)
         edit_menu.addAction(redo_action)
 
+        return menu_bar
+
+    def init_ui(self):
+        # The main layout is now vertical to accommodate the menu bar at the top.
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # --- Menu Bar ---
+        menu_bar = self._create_menu_bar()
         main_layout.addWidget(menu_bar)
 
         # fix width/height of right and bottom bars while allowing user to change them
@@ -243,24 +275,11 @@ class MainWindow(QWidget):
         right_panel.setFrameShape(QFrame.Shape.StyledPanel)
         right_layout = QVBoxLayout(right_panel)
 
-        self.right_label = QLabel("Right Panel (for node settings)")
-        right_layout.addWidget(self.right_label)
-
-        load_button = QPushButton("Load Image")
-        load_button.clicked.connect(self.load_image)
-        right_layout.addWidget(load_button)
-
-        invert_button = QPushButton("Invert Image")
-        invert_button.clicked.connect(self.process_callback)
-        right_layout.addWidget(invert_button)
-
-        version_button = QPushButton("Get LibRaw Version")
-        version_button.clicked.connect(self.show_libraw_version)
-        right_layout.addWidget(version_button)
-
-        self.version_label = QLabel("LibRaw version will be shown here.")
-        right_layout.addWidget(self.version_label)
-
+        # Create a container for the default widgets that are shown when no node is selected
+        self.default_panel_widget = DefaultPanel(parent=right_panel)
+        self.default_panel_widget.load_image_clicked.connect(self.load_image)
+        self.default_panel_widget.get_version_clicked.connect(self.show_libraw_version)
+        right_layout.addWidget(self.default_panel_widget)
         horizontal_splitter.addWidget(left_panel)
         horizontal_splitter.addWidget(right_panel)
 
@@ -276,6 +295,7 @@ class MainWindow(QWidget):
 
         self.node_scene = node_scene = nodes.NodeScene(self.controller, self.model)
         node_scene.node_selected.connect(self.update_right_panel)
+        self.model.node_removed.connect(self.on_node_removed_from_model)
 
         node_view = nodes.NodeView(node_scene)
         node_view.setStyleSheet("border: none;")
@@ -317,35 +337,89 @@ class MainWindow(QWidget):
         if file_path:
             self.image_container.add_image()
 
+    def save_project(self):
+        """Saves the project to the current file path, or prompts for a new one."""
+        if self.current_filepath:
+            self.controller.save_project(self.current_filepath, self.selected_node_id)
+        else:
+            self.save_project_as()
+
+    def save_project_as(self):
+        """Prompts the user for a file path and saves the project."""
+        default_path = self.current_filepath or os.path.expanduser("~/untitled.mpr")
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project",
+            default_path,
+            "MPR Project Files (*.mpr);;All Files (*)"
+        )
+        if filepath:
+            self.current_filepath = filepath
+            self.controller.save_project(filepath, self.selected_node_id)
+            self.setWindowTitle(f"Photo Editor - {os.path.basename(filepath)}")
+
+    def open_project(self):
+        """Open the project from a .mpr file."""
+        default_path = self.current_filepath or os.path.expanduser("~/untitled.mpr")
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", default_path, "MPR Project Files (*.mpr);;All Files (*)"
+        )
+        if filepath:
+            self.current_filepath = filepath
+            ui_state = self.controller.load_project(filepath)
+            self.setWindowTitle(f"Photo Editor - {os.path.basename(filepath)}")
+
+            if ui_state:
+                selected_node_id = ui_state.get('selected_node_id')
+                if selected_node_id:
+                    def reselect_node():
+                        node_item = self.node_scene.node_items.get(selected_node_id)
+                        if node_item:
+                            self.node_scene.select_node_item(node_item)
+                    # Use a QTimer to ensure the re-selection happens after the UI has been fully built.
+                    QTimer.singleShot(0, reselect_node)
+
+    def on_node_removed_from_model(self, node_id: str):
+        """Removes the corresponding panel from the cache when a node is deleted."""
+        if node_id in self.panel_cache:
+            panel_to_remove = self.panel_cache.pop(node_id)
+            if self.current_panel == panel_to_remove:
+                self.current_panel = None
+            panel_to_remove.deleteLater()
+
     def update_right_panel(self, node):
-        print("update_right_panel called with:", node)
+        # 1. Hide the currently visible node-specific panel
+        if self.current_panel:
+            self.current_panel.hide()
+            self.current_panel = None
 
-        layout = self.right_panel.layout()
-        if not layout:
-            # This should not happen if init_ui is correct, but it's a safe guard.
-            return
-
-        # Clear old panel widgets more robustly.
-        # This is the idiomatic way to clear a layout in Qt.
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-
+        # 2. Decide which panel to show
         if node and node.node_id:
-            # Pass the node_id, model, and controller to create a data-driven panel
-            panel = node_panels.get_node_panel(node.node_id, self.model, self.controller)
-            layout.addWidget(panel)
+            # A node is selected, so hide the default panel and show the node's panel
+            self.selected_node_id = node.node_id
+            self.default_panel_widget.hide()
+            node_id = node.node_id
 
-    def process_callback(self):
-        global image_data
-        result = invert_image(image_data, 100, 100)
-        print("Image processed. First 10 pixels:", result[:10])
+            if node_id in self.panel_cache:
+                panel = self.panel_cache[node_id]
+            else:
+                panel = get_node_panel(node_id, self.model, self.controller, parent=self.right_panel)
+                layout = self.right_panel.layout()
+                if layout:
+                    layout.addWidget(panel)
+                    self.panel_cache[node_id] = panel
+
+            panel.show()
+            self.current_panel = panel
+        else:
+            # No node is selected, so show the default panel
+            self.selected_node_id = None
+            self.default_panel_widget.show()
 
     def show_libraw_version(self):
         """Gets the LibRaw version and displays it in the label."""
         version = get_libraw_version()
-        self.version_label.setText(f"LibRaw Version: {version}")
+        self.default_panel_widget.set_version_text(f"LibRaw Version: {version}")
 
 
 def main():

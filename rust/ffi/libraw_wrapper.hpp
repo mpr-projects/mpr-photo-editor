@@ -15,6 +15,8 @@ struct LibRawMetadata {
 
 typedef struct LibRawHandle LibRawHandle;
 
+const char* libraw_wrapper_version();
+
 LibRawHandle* libraw_wrapper_create();
 void libraw_wrapper_destroy(LibRawHandle* handle);
 

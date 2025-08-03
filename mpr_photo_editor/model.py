@@ -1,6 +1,8 @@
 import uuid
 from PySide6.QtCore import QObject, Signal, QPointF
 
+from mpr_photo_editor import backend
+
 
 class Model(QObject):
     """
@@ -43,6 +45,70 @@ class Model(QObject):
         # { node_id: backend_object_handle }
         self.runtime_cache = {}
 
+        # A cache for thumbnails to avoid re-fetching from the backend,
+        # as some backend operations may be one-shot.
+        self.thumbnail_cache = {}
+
+    def to_dict(self):
+        """
+        Convert graph information to dictionary for easy saving.
+        """
+        return dict(
+            version = self.version,
+            nodes = self.nodes,
+            connections = self.connections
+        )
+
+    def clear(self):
+        """Clears the entire model, releasing any associated backend resources."""
+        # Release backend resources for all image loader nodes
+        for node_data in self.nodes.values():
+            if node_data.get("type") == "ImageLoader":
+                raw_image_id = node_data.get("settings", {}).get("raw_image_id")
+                if raw_image_id is not None:
+                    backend.release_raw_image(raw_image_id)
+
+        # Emit signals to remove all UI elements before clearing the data.
+        # Iterate over copies as the lists will be modified by remove signals.
+        for conn_data in list(self.connections):
+            self.connection_removed.emit(conn_data)
+
+        for node_id in list(self.nodes.keys()):
+            self.node_removed.emit(node_id)
+
+        # Clear the internal data structures
+        self.nodes = {}
+        self.connections = []
+        self.runtime_cache = {}
+        self.thumbnail_cache = {}
+
+    def from_dict(self, data: dict):
+        """Populates the model from a dictionary, rebuilding the graph."""
+        self.clear()  # Start with a clean slate, releasing old resources.
+
+        self.version = data.get('version', self.version)
+        nodes_data = data.get('nodes', {})
+
+        # Re-acquire backend resources for image loaders before adding to model
+        for node_id, node_data in nodes_data.items():
+            if node_data.get("type") == "ImageLoader" and node_data.get("settings", {}).get("filepath"):
+                filepath = node_data["settings"]["filepath"]
+                try:
+                    node_data["settings"]["raw_image_id"] = backend.load_raw_image(filepath)
+                except Exception as e:
+                    print(f"Failed to reload image '{filepath}' for node {node_id}: {e}")
+                    node_data["settings"]["raw_image_id"] = None
+
+        self.nodes = nodes_data
+        self.connections = data.get('connections', [])
+
+        # Now that data is loaded, emit signals to build the UI
+        for node_id in self.nodes.keys():
+            self.node_added.emit(node_id)
+
+        for connection_data in self.connections:
+            self.connection_added.emit(connection_data)
+
     def _add_node_with_data(self, node_id: str, node_data: dict):
         """
         Private method to add a node with a specific ID and data.
@@ -82,11 +148,17 @@ class Model(QObject):
             for conn in connections_to_remove:
                 self.remove_connection(conn)
 
-            # Remove the node itself
+            # Free backend resources if this is an image loader node
+            node_data = self.nodes[node_id]
+            if node_data.get("type") == "ImageLoader":
+                raw_image_id = node_data.get("settings", {}).get("raw_image_id")
+                if raw_image_id is not None:
+                    backend.release_raw_image(raw_image_id)
+                    if raw_image_id in self.thumbnail_cache:
+                        del self.thumbnail_cache[raw_image_id]
+
+            # Remove the node itself from the model
             del self.nodes[node_id]
-            if node_id in self.runtime_cache:
-                # TODO: Tell the backend to free the associated resource
-                del self.runtime_cache[node_id]
 
             self.node_removed.emit(node_id)
         else:

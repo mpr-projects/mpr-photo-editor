@@ -9,6 +9,10 @@ struct LibRawHandle {
 
 extern "C" {
 
+const char* libraw_wrapper_version() {
+    return libraw_version();
+}
+
 LibRawHandle* libraw_wrapper_create() {
     return new LibRawHandle();
 }

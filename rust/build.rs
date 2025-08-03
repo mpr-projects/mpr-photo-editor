@@ -76,6 +76,7 @@ fn unix_build_libraw() -> String {
     "external/libraw/".to_string()
 }
 
+/*
 fn generate_bindings(header_path: &str) {
     // Use an allowlist to only generate bindings for the functions and types
     // we actually use. This is more robust than a blocklist and avoids
@@ -95,6 +96,7 @@ fn generate_bindings(header_path: &str) {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 }
+*/
 
 fn compile_libraw_wrapper(header_path: &str) {
     // Tell cargo to rebuild if the wrapper changes
@@ -135,6 +137,5 @@ fn main() {
         unix_build_libraw()
     };
 
-    // generate_bindings(&header_path);
     compile_libraw_wrapper(&header_path);
 }

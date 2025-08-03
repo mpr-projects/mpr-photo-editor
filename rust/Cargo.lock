@@ -255,6 +255,7 @@ dependencies = [
  "autotools",
  "bindgen",
  "cc",
+ "lazy_static",
  "ndarray",
  "pkg-config",
  "pyo3",

@@ -2,8 +2,8 @@ from __future__ import annotations
 import os
 from typing import cast, Optional
 
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem, QGraphicsRectItem, QGraphicsSceneMouseEvent, QGraphicsTextItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QFileDialog, QPushButton, QGraphicsProxyWidget, QMenu, QGraphicsSceneContextMenuEvent
-from PySide6.QtGui import QPainterPath, QPen, QColor, QPainter, QBrush, QTransform, QCursor
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsEllipseItem, QGraphicsRectItem, QGraphicsSceneMouseEvent, QGraphicsTextItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QFileDialog, QPushButton, QGraphicsProxyWidget, QMenu, QGraphicsSceneContextMenuEvent
+from PySide6.QtGui import QPainterPath, QPen, QColor, QPainter, QBrush, QTransform, QCursor, QMouseEvent
 from PySide6.QtCore import QRectF, QPointF, Qt, QEvent, Signal
 
 from mpr_photo_editor.controller import Controller
@@ -166,9 +166,9 @@ class NodeBase(QGraphicsItem):
         painter.setBrush(QBrush(self.title_bg_color))
         painter.drawRoundedRect(0, 0, self.width, self.title_height, 5, 5)
 
-        # Draw cyan border highlight if selected
+        # Draw border highlight if selected
         if self.isSelected():
-            border_color = QColor("#009F3F")
+            border_color = QColor("#E0C708")
             pen = QPen(border_color, 3)
             pen.setStyle(Qt.PenStyle.SolidLine)
             painter.setPen(pen)
@@ -238,6 +238,9 @@ class NodeBase(QGraphicsItem):
         if self.get_scene().socket_active:
             event.ignore()
             return
+
+        # Use the central selection service
+        self.get_scene().select_node_item(self)
 
         # Store starting position for a potential move command
         self._drag_start_pos = self.pos()
@@ -321,6 +324,9 @@ class NodeImageLoader(NodeBase):
         self.height = self.output_labels[-1].y() + self.output_labels[-1].boundingRect().height()
 
     def select_file(self):
+        # Use the central selection service to ensure this node is selected
+        self.get_scene().select_node_item(self)
+
         file_path, _ = QFileDialog.getOpenFileName(
             None, "Select Image File", "",
             "Raw Images (*.cr2 *.nef *.arw *.dng *.rw2 *.orf *.raf *.srw *.pef);;All Files (*)")
@@ -426,26 +432,42 @@ class NodeScene(QGraphicsScene):
         self.model.connection_removed.connect(self.on_connection_removed)
         self.model.node_position_changed.connect(self.on_node_position_changed)
 
-    def mousePressEvent(self, event):
+    def select_node_item(self, node_to_select: Optional[NodeBase]):
+        """
+        Central method to handle node selection.
+
+        Clears the current selection, selects the given node (if any),
+        and emits the node_selected signal to update the UI.
+        """
+        current_selection = self.selectedItems()
+
+        # Prevent redundant work if the selection state is already correct.
+        if not node_to_select and not current_selection:
+            return  # Nothing to do, already deselected
+        if node_to_select and len(current_selection) == 1 and current_selection[0] == node_to_select:
+            return  # Nothing to do, node already selected
+
+        self.clearSelection()
+        if node_to_select:
+            node_to_select.setSelected(True)
+
+        # Emit the signal with the new selection (or None if deselected)
+        self.node_selected.emit(node_to_select)
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), QTransform())
         if isinstance(item, NodeSocket):
             self.start_socket = item
             self.temp_connection = QGraphicsPathItem()
             self.temp_connection.setPen(QPen(QColor(Qt.GlobalColor.darkYellow), 2, Qt.PenStyle.DashLine))
+            self.temp_connection.setZValue(-1)  # Ensure it's drawn under the sockets
             self.addItem(self.temp_connection)
             self.socket_active = True
+            return  # Consume the event and do not process further
 
         super().mousePressEvent(event)
 
-        # Todo: should we really do that on every mouse press? should we check for all items to see if there's a node?
-        for item in self.selectedItems():
-            if isinstance(item, NodeBase):
-                self.node_selected.emit(item)
-                break
-        else:
-            self.node_selected.emit(None)
-
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self.temp_connection and self.start_socket:
             p1 = self.start_socket.scenePos()
             p2 = event.scenePos()
@@ -456,7 +478,7 @@ class NodeScene(QGraphicsScene):
             self.temp_connection.setPath(path)
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self.temp_connection and self.start_socket:
             self.socket_active = False
 
@@ -491,7 +513,7 @@ class NodeScene(QGraphicsScene):
             self.start_socket = None
         super().mouseReleaseEvent(event)
 
-    def contextMenuEvent(self, event):
+    def contextMenuEvent(self, event: QGraphicsSceneContextMenuEvent):
         item = self.itemAt(event.scenePos(), QTransform())
         print('item:', item)
         
@@ -582,6 +604,11 @@ class NodeScene(QGraphicsScene):
             for key, value in node_data.get("settings", {}).items():
                 node_item.on_setting_changed(node_id, key, value)
 
+            # Automatically select the new node and update the side panel
+            self.clearSelection()
+            node_item.setSelected(True)
+            self.node_selected.emit(node_item)
+
     def on_node_removed(self, node_id: str):
         """Slot to handle when a node is removed from the model."""
         if node_id in self.node_items:
@@ -616,19 +643,25 @@ class NodeView(QGraphicsView):
         self.setRenderHints(self.renderHints() | QPainter.RenderHint.Antialiasing)
         self._zoom = 1.0
         self._zoom_range = (0.5, 2.0)
+        self._zoom_in_factor = 1.15
+        self._zoom_out_factor = 1 / self._zoom_in_factor
         self._is_panning = False
         self._pan_start = QPointF()
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
+    def get_scene(self) -> NodeScene:
+        """A type-hinted helper to get the scene as a NodeScene."""
+        return cast(NodeScene, self.scene())
+
     def wheelEvent(self, event):
-        zoom_in_factor = 1.15
-        zoom_out_factor = 1 / zoom_in_factor
-
         if event.angleDelta().y() > 0:
-            zoom_factor = zoom_in_factor
+            zoom_factor = self._zoom_in_factor
         else:
-            zoom_factor = zoom_out_factor
+            zoom_factor = self._zoom_out_factor
 
+        self.zoom(zoom_factor)
+
+    def zoom(self, zoom_factor):
         new_zoom = self._zoom * zoom_factor
         min_zoom, max_zoom = self._zoom_range
 
@@ -645,25 +678,47 @@ class NodeView(QGraphicsView):
         self.setTransformationAnchor(self.ViewportAnchor.NoAnchor)
         self.setResizeAnchor(self.ViewportAnchor.NoAnchor)
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.MiddleButton:
+    def mousePressEvent(self, event: QMouseEvent):
+        is_middle_click = event.button() == Qt.MouseButton.MiddleButton
+        is_left_background_click = (
+            event.button() == Qt.MouseButton.LeftButton and
+            not self.scene().items(self.mapToScene(event.position().toPoint()))
+        )
+
+        if is_middle_click or is_left_background_click:
             self._is_panning = True
             self._pan_start = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QMouseEvent):
         if self._is_panning:
-            delta = event.position() - self._pan_start
-            self._pan_start = event.position()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            pan_end = event.position()
+            delta = pan_end - self._pan_start
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(delta.y()))
+            self._pan_start = pan_end
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.MiddleButton:
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._is_panning:
+            # Check if it was a click without a significant drag
+            moved_distance = (event.position() - self._pan_start).manhattanLength()
+            is_left_click = event.button() == Qt.MouseButton.LeftButton
+
+            if is_left_click and moved_distance < QApplication.startDragDistance():
+                self.get_scene().select_node_item(None)
+
             self._is_panning = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event):
@@ -682,5 +737,14 @@ class NodeView(QGraphicsView):
                 event.accept()
             else:
                 super().keyPressEvent(event)
+
+        elif event.key() == Qt.Key.Key_Plus:
+            self.zoom(self._zoom_in_factor)
+            event.accept()
+
+        elif event.key() == Qt.Key.Key_Minus:
+            self.zoom(self._zoom_out_factor)
+            event.accept()
+
         else:
             super().keyPressEvent(event)
