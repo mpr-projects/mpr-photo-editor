@@ -414,8 +414,8 @@ class NodeScene(QGraphicsScene):
         self.controller = controller
         self.model = model
 
-        self.temp_connection = None
-        self.start_socket = None
+        self.temp_connection: Optional[QGraphicsPathItem] = None
+        self.start_socket: Optional[NodeSocket] = None
         self.socket_active = False
 
         # Store a map from model ID to the QGraphicsItem. This will be used
@@ -469,7 +469,7 @@ class NodeScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self.temp_connection and self.start_socket:
-            p1 = self.start_socket.scenePos()
+            p1 = self.start_socket.scenePos()  # type: ignore
             p2 = event.scenePos()
             path = QPainterPath(p1)
             ctr1 = QPointF(p1.x() + 50, p1.y())
@@ -482,7 +482,7 @@ class NodeScene(QGraphicsScene):
         if self.temp_connection and self.start_socket:
             self.socket_active = False
 
-            end_item = next(
+            end_item: Optional[NodeSocket] = next(
                 (i for i in self.items(event.scenePos())
                  if isinstance(i, NodeSocket)
                  and i is not self.start_socket
@@ -494,7 +494,7 @@ class NodeScene(QGraphicsScene):
                 if (
                     self.start_socket.socket_type == end_item.socket_type and
                     self.start_socket.is_input != end_item.is_input and
-                    self.start_socket.parentItem() != end_item.parentItem()
+                    self.start_socket.parentItem() != end_item.parentItem()  # type: ignore
                 ):
                     # Determine which socket is the output (from) and which is the input (to)
                     from_socket = self.start_socket if not self.start_socket.is_input else end_item

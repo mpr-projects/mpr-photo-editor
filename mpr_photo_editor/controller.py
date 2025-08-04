@@ -50,15 +50,15 @@ class Controller(QObject):
             try:
                 new_raw_image_id = backend.load_raw_image(value)
                 # If loading succeeds, create the specialized command.
-                command = image_commands.LoadImageCommand(self.model, node_id, value, new_raw_image_id)
-                self.undo_stack.push(command)
+                load_command = image_commands.LoadImageCommand(self.model, node_id, value, new_raw_image_id)
+                self.undo_stack.push(load_command)
             except Exception as e:
                 # TODO: Show this error to the user in a dialog.
                 print(f"Failed to load image '{value}': {e}. The action was cancelled.")
         else:
             # For all other settings, use the generic command.
-            command = setting_commands.ChangeSettingCommand(self.model, node_id, key, value)
-            self.undo_stack.push(command)
+            setting_command = setting_commands.ChangeSettingCommand(self.model, node_id, key, value)
+            self.undo_stack.push(setting_command)
 
     def add_connection(self, from_node: str, from_socket: str, to_node: str, to_socket: str):
         """Creates and executes a command to add a connection."""

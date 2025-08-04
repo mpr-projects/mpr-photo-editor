@@ -1,6 +1,6 @@
 [build-system]
-requires = ["maturin>=1.2"]
-build-backend = "maturin"
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "mpr-photo-editor"
@@ -14,10 +14,10 @@ authors = [
 dependencies = [
     "pyside6"
 ]
-keywords = ["photo", "editor", "rust", "gui", "image-processing"]
+keywords = ["photo", "editor", "c++", "gui", "image-processing"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Rust",
+    "Programming Language :: C++",
     "Operating System :: OS Independent",
     "Development Status :: 3 - Alpha",
     "Intended Audience :: End Users/Desktop",
@@ -29,18 +29,16 @@ mpr-photo-editor = "mpr_photo_editor.gui:main"
 
 [project.optional-dependencies]
 dev = [
+    "pybind11", # Required for building the C++ backend
     "pytest",
-    "maturin",
     "mypy",
     "ruff",
-    "pyo3-stubgen",
-    "delocate; sys_platform == 'darwin'",
-    "auditwheel; sys_platform == 'linux'"
+    # on Linux we also install auditwheel in the CI workflow file,
+    # on macOS we also install delocate in the CI workflow file
 ]
 
-[tool.maturin]
-module-name = "mpr_photo_editor.rust_backend"
-python-source = "."
+[tool.scikit-build]
+wheel.packages = ["mpr_photo_editor"]
 
 [tool.mypy]
 [[tool.mypy.overrides]]

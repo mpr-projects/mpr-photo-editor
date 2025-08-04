@@ -7,7 +7,7 @@ from PySide6.QtGui import (
     QMouseEvent, QKeySequence, QColor, QGuiApplication, QAction
 )
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QLabel,
+    QApplication, QWidget, QLabel,
     QHBoxLayout, QVBoxLayout, QFrame, QSplitter,
     QFileDialog, QMenuBar
 )

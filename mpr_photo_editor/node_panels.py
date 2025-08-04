@@ -1,6 +1,6 @@
 import os
 from typing import Optional
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QPushButton, QFileDialog, QApplication, QSizePolicy
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QPushButton, QFileDialog, QApplication
 from PySide6.QtGui import QPixmap, QPainter, QImage
 from PySide6.QtCore import Qt, Signal
 

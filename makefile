@@ -1,41 +1,66 @@
-.PHONY: develop install test run clean check
+# Makefile for simplifying common development tasks.
 
-develop:
-	maturin develop
-	pyo3-stubgen mpr_photo_editor.rust_backend .
+# --- Variables ---
+# Find the python interpreter. This is tricky because `make` runs in a non-interactive
+# shell that may not have the `pyenv` shims in its PATH.
+# We first check if `pyenv` is an available command. If so, we use `pyenv which python`
+# as it's the most reliable way to get the correct interpreter.
+# If not, we fall back to a standard PATH search.
+ifeq ($(shell command -v pyenv 2>/dev/null),)
+	PYTHON ?= $(shell command -v python || command -v python3)
+else
+	PYTHON ?= $(shell pyenv which python)
+endif
 
-install:
-	pip install .[dev]
 
-check:
-	mypy mpr_photo_editor tests
-	ruff check mpr_photo_editor tests
+# --- Targets ---
+.PHONY: help setup run build-gui test check clean check-env
 
-test:
-	# To prevent import path shadowing, where pytest finds the local source
-	# code instead of the installed package, we rename the source directory
-	# for the duration of the test run. The exit code from pytest is
-	# preserved to ensure the command fails if tests fail.
-	mv mpr_photo_editor mpr_photo_editor_temp; \
-	PYTHONPATH=. pytest; EXIT_CODE=$$?; \
-	mv mpr_photo_editor_temp mpr_photo_editor; \
-	(exit $$EXIT_CODE)
+help:
+	@echo "Available commands:"
+	@echo "  setup        - Set up the Python environment and build the C++ backend"
+	@echo "  run          - Run the Python GUI application"
+	@echo "  build-gui    - Build the native C++ GUI executable (found in build/gui/)"
+	@echo "  test         - Run python tests"
+	@echo "  check        - Run static analysis (mypy, ruff)"
+	@echo "  clean        - Remove all build artifacts and caches"
+	@echo "  check-env    - Check the environment variables and paths seen by make"
+
+setup:
+	@echo "Installing Python dependencies and building C++ backend via scikit-build-core..."
+	$(PYTHON) -m pip install -e .[dev]
+	@echo "Development environment is ready."
 
 run:
-	PYTHONPATH=. python -m mpr_photo_editor.gui
+	@echo "Running the Python GUI application (C++ backend)..."
+	$(PYTHON) -m mpr_photo_editor.gui
+
+build-gui:
+	@echo "Configuring and building the native C++ GUI..."
+	cmake -B build -S .
+	cmake --build build --target mpr_photo_editor_gui
+	@echo "C++ GUI executable is available at build/gui/mpr_photo_editor_gui"
+
+test:
+	@echo "Running python tests..."
+	$(PYTHON) -m pytest tests/python
+
+check:
+	@echo "Running static analysis..."
+	@echo "--- MyPy ---"
+	$(PYTHON) -m mypy mpr_photo_editor tests/python
+	@echo "--- Ruff ---"
+	$(PYTHON) -m ruff check mpr_photo_editor tests/python
 
 clean:
-	rm -rf build
-	find . -name "*.so" -delete
-	find . -name "*.pyi" -delete
+	@echo "Cleaning build artifacts..."
+	rm -rf build/ dist/ *.egg-info mpr_photo_editor/*.so mpr_photo_editor/*.pyd .pytest_cache/ .mypy_cache/ .ruff_cache/ _skbuild/
+	@echo "Done."
 
-wheel:
-	# Ensure all dependencies are installed, including delocate for macOS.
-	pip install .[dev] delocate
-	# Build the wheel. On macOS, DYLD_LIBRARY_PATH must be set so that
-	# delocate can find the libraw dylib to bundle into the wheel.
-	# A similar approach with LD_LIBRARY_PATH is needed on Linux.
-	DYLD_LIBRARY_PATH=build/libraw_dist/lib maturin build --release
-	@wheel_path=$$(ls -t build/target/wheels/*.whl | head -n 1); \
-	echo "Running delocate on $$wheel_path"; \
-	delocate-wheel -w build/target/wheels/ $$wheel_path
+check-env:
+	@echo "--- Environment Check ---"
+	@echo "Make's default shell: $(SHELL)"
+	@echo "Python interpreter command: '$(PYTHON)'"
+	@echo "Full path to interpreter: '$(shell command -v $(PYTHON))'"
+	@echo "Python version: '$($(PYTHON) --version)'"
+	@echo "-----------------------"

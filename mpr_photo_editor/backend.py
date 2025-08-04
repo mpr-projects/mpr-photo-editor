@@ -1,29 +1,20 @@
+
+
 try:
-    from . import rust_backend # type: ignore
+    # Import the C++ backend.
+    # This will be a .pyd or .so file built by CMake and copied here.
+    from . import cpp_backend  # type: ignore
 
-except ImportError:
-    raise ImportError("Rust backend not compiled. Run `maturin develop` first.")
+    # Re-export the functions from the C++ backend
+    get_libraw_version = cpp_backend.get_libraw_version
+    load_raw_image = cpp_backend.load_raw_image
+    release_raw_image = cpp_backend.release_raw_image
+    get_thumbnail = cpp_backend.get_thumbnail
+    get_metadata = cpp_backend.get_metadata
 
-def get_libraw_version() -> str:
-    """Retrieves the LibRaw version string from the Rust backend."""
-    return rust_backend.get_libraw_version()
-
-
-def load_raw_image(filepath: str) -> int:
-    """Loads a raw image and returns a unique ID."""
-    return rust_backend.load_raw_image(filepath)
-
-
-def release_raw_image(image_id: int):
-    """Releases the resources for a given image ID."""
-    rust_backend.release_raw_image(image_id)
-
-
-def get_thumbnail(image_id: int) -> bytes:
-    """Gets the thumbnail data for a given image ID."""
-    return rust_backend.get_thumbnail(image_id)
-
-
-def get_metadata(image_id: int) -> dict[str, str]:
-    """Gets the metadata for a given image ID."""
-    return rust_backend.get_metadata(image_id)
+except ImportError as e:
+    raise ImportError(
+        "Could not import the 'cpp_backend'. Please build the project first "
+        "(e.g., run 'make build-cpp').\n"
+        f"Original error: {e}"
+    )

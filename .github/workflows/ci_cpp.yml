@@ -1,0 +1,42 @@
+name: Build C++ GUI Application
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  # Triggers the workflow when a new release is created
+  release:
+    types: [created]
+
+jobs:
+  build-macos:
+    name: Build macOS App Bundle
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake qt6
+
+      - name: Configure CMake
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build application
+        # Build only the C++ GUI target to save time
+        run: cmake --build build --target mpr_photo_editor_gui --config Release
+
+      - name: Bundle Qt dependencies into .app
+        run: |
+          # Use Qt's macdeployqt tool to copy all necessary Qt frameworks and plugins
+          # into the .app bundle, making it self-contained.
+          # The -dmg flag also creates a distributable disk image.
+          macdeployqt build/gui/mpr_photo_editor_gui.app -dmg
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpr-photo-editor-gui-macos
+          # The path is the .dmg file created by macdeployqt in the same
+          # directory as the .app bundle.
+          path: build/gui/mpr_photo_editor_gui.dmg
