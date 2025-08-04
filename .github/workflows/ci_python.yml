@@ -1,4 +1,4 @@
-name: CI
+name: Build Python Package
 
 on:
   push:
@@ -43,6 +43,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: 6.8.3
+          cache: 'true'
 
       - name: Install system build dependencies (Ubuntu)
         if: runner.os == 'Linux'
@@ -66,21 +67,6 @@ jobs:
         # dist, the repair step would then try to repair pyside6, which would raise an error
         run: pip wheel . --cache-dir ${{ env.PIP_CACHE_DIR }} --wheel-dir dist --no-deps
 
-      - name: debugging
-        if: runner.os == 'Windows'
-        run: |
-          echo "${{ steps.vcpkg.outputs.vcpkg-cmake-config }}"
-          $toolchainPath = "${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-          echo "Checking for toolchain file at: $toolchainPath"
-          if (Test-Path -Path $toolchainPath) {
-              echo "SUCCESS: Toolchain file found."
-          } else {
-              echo "ERROR: Toolchain file NOT found."
-          }
-          echo "--- Listing contents of vcpkg bin directory ---"
-          Get-ChildItem -Path "${{ github.workspace }}/vcpkg/installed/x64-windows-release/bin" -ErrorAction SilentlyContinue
-          echo "---------------------------------------------"
-
       - name: Install python build dependencies and build wheel (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -90,7 +76,7 @@ jobs:
           Copy-Item -Path "${{ github.workspace }}/vcpkg/installed/x64-windows-release/bin/*.dll" -Destination $libDir
 
           # create the package
-          pip wheel . --cache-dir ${{ env.PIP_CACHE_DIR }} --wheel-dir dist --no-deps
+          pip -v wheel . --cache-dir ${{ env.PIP_CACHE_DIR }} --wheel-dir dist --no-deps
         env:  # we need to tell cmake where to find pkg-config (scikit-build-core has to pass the variables on to cmake)
           SKBUILD_CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake;-DVCPKG_TARGET_TRIPLET=x64-windows-release;-DVCPKG_MANIFEST_MODE=OFF"
         shell: pwsh

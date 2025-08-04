@@ -14,13 +14,14 @@ endif
 
 
 # --- Targets ---
-.PHONY: help setup run build-gui test check clean check-env
+.PHONY: help setup run build-gui test check clean check-env build-bindings
 
 help:
 	@echo "Available commands:"
 	@echo "  setup        - Set up the Python environment and build the C++ backend"
 	@echo "  run          - Run the Python GUI application"
 	@echo "  build-gui    - Build the native C++ GUI executable (found in build/gui/)"
+	@echo "  build-bindings - Build the C++ Python module (found in build/cpp/)"
 	@echo "  test         - Run python tests"
 	@echo "  check        - Run static analysis (mypy, ruff)"
 	@echo "  clean        - Remove all build artifacts and caches"
@@ -28,18 +29,24 @@ help:
 
 setup:
 	@echo "Installing Python dependencies and building C++ backend via scikit-build-core..."
-	$(PYTHON) -m pip install -e .[dev]
+	$(PYTHON) -m pip install -v -e .[dev]
 	@echo "Development environment is ready."
 
 run:
 	@echo "Running the Python GUI application (C++ backend)..."
 	$(PYTHON) -m mpr_photo_editor.gui
 
+build-bindings:
+	@echo "Configuring and building the Python C++ module..."
+	cmake -B build -S .
+	cmake --build build --target cpp_backend_python_bindings --verbose
+	@echo "Python module is available in the build directory (e.g., build/cpp/)."
+
 build-gui:
 	@echo "Configuring and building the native C++ GUI..."
 	cmake -B build -S .
-	cmake --build build --target mpr_photo_editor_gui
-	@echo "C++ GUI executable is available at build/gui/mpr_photo_editor_gui"
+	cmake --build build --target PhotoEditor
+	@echo "C++ GUI executable is available at build/gui/PhotoEditor"
 
 test:
 	@echo "Running python tests..."
@@ -51,6 +58,7 @@ check:
 	$(PYTHON) -m mypy mpr_photo_editor tests/python
 	@echo "--- Ruff ---"
 	$(PYTHON) -m ruff check mpr_photo_editor tests/python
+
 
 clean:
 	@echo "Cleaning build artifacts..."

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PhotoEditor
+GenericName=Photo Editor
+Comment=A node-based photo editor for full pipeline transparency
+Exec=PhotoEditor %F
+Icon=PhotoEditor
+Terminal=false
+Categories=Graphics;2DGraphics;Photography;

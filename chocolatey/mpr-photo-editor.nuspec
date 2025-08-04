@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Read more about this file at https://docs.chocolatey.org/en-us/create/create-packages -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>mpr-photo-editor</id>
+    <version>$version$</version> <!-- This is a placeholder that will be replaced by the CI workflow -->
+    <title>Photo Editor</title>
+    <authors>Michael Prasthofer</authors>
+    <owners>Michael Prasthofer</owners>
+    <projectUrl>https://github.com/mpr-projects/mpr-photo-editor</projectUrl>
+    <licenseUrl>https://github.com/mpr-projects/mpr-photo-editor/blob/main/LICENSE</licenseUrl>
+    <iconUrl>https://github.com/mpr-projects/mpr-photo-editor/blob/main/gui/resources/PhotoEditor.png</iconUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>A node-based cross-platform photo editor for full pipeline transparency.</description>
+    <summary>A node-based cross-platform photo editor.</summary>
+    <releaseNotes>https://github.com/mpr-projects/mpr-photo-editor/releases</releaseNotes>
+    <tags>photo editor image-processing graphics admin</tags>
+    <packageSourceUrl>https://github.com/mpr-projects/mpr-photo-editor</packageSourceUrl>
+  </metadata>
+  <files>
+    <!-- This includes the install/uninstall scripts -->
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

@@ -10,6 +10,9 @@ message(STATUS "Checking for VCPKG manifest mode. VCPKG_MANIFEST_MODE='${VCPKG_M
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- Build Options ---
+option(MPO_BUILD_PYTHON_BINDINGS "Build the Python backend module" ON)
+
 # --- Find Dependencies ---
 # These are found at the top level so they are available to all sub-projects.
 
@@ -19,21 +22,23 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # Find LibRaw for the C++ backend.
 # LibRaw uses autotools, so it provides a .pc file for pkg-config.
 # We use CMake's PkgConfig module to find it in a platform-agnostic way.
+# Using pkg_search_module creates an imported target PkgConfig::PC_LIBRAW,
+# which is a more robust way to handle dependencies.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PC_LIBRAW REQUIRED libraw)
+pkg_search_module(PC_LIBRAW REQUIRED libraw)
 
-
-# Find pybind11 to create Python bindings for our C++ backend.
-# Assumes pybind11 is installed (e.g., via `pip install pybind11`).
-# Use the modern FindPython module to satisfy policy CMP0148 and avoid warnings.
-find_package(Python REQUIRED COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+if(MPO_BUILD_PYTHON_BINDINGS)
+    # Find pybind11 to create Python bindings for our C++ backend.
+    # Assumes pybind11 is installed (e.g., via `pip install pybind11`).
+    # Use the modern FindPython module to satisfy policy CMP0148 and avoid warnings.
+    find_package(Python REQUIRED COMPONENTS Interpreter Development)
+    find_package(pybind11 REQUIRED)
+endif()
 
 # --- Project Structure ---
 # Add subdirectories for the C++ backend and frontend.
 add_subdirectory(cpp)
 add_subdirectory(gui)
-
 
 # Enable testing with CTest and include the tests directory.
 enable_testing()
@@ -43,4 +48,7 @@ add_subdirectory(tests)
 message(STATUS "--- MPR Photo Editor Build Configuration ---")
 message(STATUS "Found Qt6: ${Qt6_FOUND} (Version: ${Qt6_VERSION})")
 message(STATUS "Found LibRaw: ${PC_LIBRAW_FOUND} (Version: ${PC_LIBRAW_VERSION})")
-message(STATUS "Found pybind11: ${pybind11_FOUND} (Version: ${pybind11_VERSION})")
+
+if(MPO_BUILD_PYTHON_BINDINGS)
+    message(STATUS "Found pybind11: ${pybind11_FOUND} (Version: ${pybind11_VERSION})")
+endif()

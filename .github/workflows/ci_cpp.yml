@@ -17,21 +17,33 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install cmake qt6
+        run: brew install cmake libraw
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: 'true'
 
       - name: Configure CMake
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DMPO_BUILD_PYTHON_BINDINGS=OFF
 
       - name: Build application
         # Build only the C++ GUI target to save time
-        run: cmake --build build --target mpr_photo_editor_gui --config Release
+        run: cmake --build build --target PhotoEditor --config Release
+
+      - name: Run GUI Start Test
+        working-directory: build
+        # Run the CTest executable. The --output-on-failure flag provides
+        # detailed logs if a test fails.
+        run: ctest --output-on-failure -C Release
 
       - name: Bundle Qt dependencies into .app
         run: |
           # Use Qt's macdeployqt tool to copy all necessary Qt frameworks and plugins
           # into the .app bundle, making it self-contained.
           # The -dmg flag also creates a distributable disk image.
-          macdeployqt build/gui/mpr_photo_editor_gui.app -dmg
+          macdeployqt build/gui/PhotoEditor.app -dmg
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
@@ -39,4 +51,169 @@ jobs:
           name: mpr-photo-editor-gui-macos
           # The path is the .dmg file created by macdeployqt in the same
           # directory as the .app bundle.
-          path: build/gui/mpr_photo_editor_gui.dmg
+          path: build/gui/PhotoEditor.dmg
+
+  build-linux:
+    name: Build Linux AppImage
+    # We use ubuntu-22.04 because linuxdeployqt requires an older glibc version
+    # to ensure the created AppImage is compatible with a wide range of distributions,
+    # as recommended by the tool's error message.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4^
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libraw-dev pkg-config fuse libgl1 libwayland-dev xvfb libxcb-cursor0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: 'true'
+
+      - name: Cache linuxdeploy tools
+        id: cache-linuxdeploy-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            linuxdeploy-x86_64.AppImage
+            linuxdeploy-plugin-qt-x86_64.AppImage
+          key: ${{ runner.os }}-linuxdeploy-tools-v1
+
+      - name: Download linuxdeploy and plugins
+        if: steps.cache-linuxdeploy-tools.outputs.cache-hit != 'true'
+        run: |
+          wget -c -nv "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -c -nv "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod a+x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DMPO_BUILD_PYTHON_BINDINGS=OFF
+          cmake --build build --target PhotoEditor --config Release
+
+      - name: Run GUI Start Test (X11)
+        working-directory: build
+        # Run the CTest executable inside a virtual X server (Xvfb) to allow
+        # the GUI smoke test to launch in a headless environment. The --output-on-failure
+        # flag provides detailed logs if a test fails.
+        run: xvfb-run -a ctest --output-on-failure -C Release
+
+      - name: Run GUI Start Test (Wayland)
+        if: false # Disabled for now
+        run: |
+          echo "TODO: Implement GUI start test on a headless Wayland compositor."
+
+      - name: Bundle dependencies and create AppImage
+        run: |
+          # The main tool needs to be able to find its plugins.
+          export LINUXDEPLOY_PLUGINS_PATH="."
+          # Explicitly include Wayland platform plugins and modules for better compatibility.
+          export EXTRA_PLATFORM_PLUGINS=libqwayland-generic.so
+          export EXTRA_QT_MODULES="waylandcompositor"
+          # Run linuxdeploy. It will create an AppDir, bundle dependencies using the qt plugin,
+          # and then create the final AppImage.
+          ./linuxdeploy-x86_64.AppImage \
+            --executable build/gui/PhotoEditor \
+            --desktop-file build/gui/PhotoEditor.desktop \
+            --icon-file build/gui/PhotoEditor.png \
+            --appdir AppDir \
+            --plugin qt \
+            --output appimage
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpr-photo-editor-gui-linux
+          path: PhotoEditor*.AppImage
+
+  build-windows:
+    name: Build Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: 'true'
+
+      - name: Install system build dependencies (vcpkg)
+        uses: johnwason/vcpkg-action@v7
+        with:
+          pkgs: libraw pkgconf
+          triplet: x64-windows-release
+          token: ${{ github.token }}
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DMPO_BUILD_PYTHON_BINDINGS=OFF -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-release -DVCPKG_MANIFEST_MODE=OFF
+          cmake --build build --target PhotoEditor --config Release
+        shell: pwsh
+
+      - name: Run GUI Start Test
+        working-directory: build
+        # Run the CTest executable. The --output-on-failure flag provides
+        # detailed logs if a test fails.
+        run: ctest --output-on-failure -C Release
+
+      - name: Bundle dependencies
+        run: |
+          $DEPLOY_DIR="build/gui/Release"
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" "$DEPLOY_DIR/PhotoEditor.exe"
+          Copy-Item -Path "${{ github.workspace }}/vcpkg/installed/x64-windows-release/bin/*.dll" -Destination $DEPLOY_DIR
+          Compress-Archive -Path "$DEPLOY_DIR/*" -DestinationPath "PhotoEditor-Windows.zip"
+        shell: pwsh
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpr-photo-editor-gui-windows
+          path: PhotoEditor-Windows.zip
+
+  # This has not been tested!!
+  publish-chocolatey:
+    name: Create Chocolatey Package
+    runs-on: windows-latest
+    # This job depends on the C++ build finishing successfully and producing the artifact.
+    needs: build-windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mpr-photo-editor-gui-windows
+          path: ./dist
+
+      - name: Get release version
+        id: get_version
+        # Strips the 'v' prefix from the tag name (e.g., v0.1.0 -> 0.1.0)
+        run: echo "version=${{ github.ref_name }}" | ForEach-Object { $_.Replace('v', '') } | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+        shell: pwsh
+
+      - name: Pack Chocolatey package
+        run: |
+          (Get-Content -Path chocolatey/mpr-photo-editor.nuspec -Raw).Replace('$version$', '${{ steps.get_version.outputs.version }}') | Set-Content -Path chocolatey/mpr-photo-editor.nuspec
+          choco pack chocolatey/mpr-photo-editor.nuspec --output-directory ./dist
+        shell: pwsh
+
+      - name: Upload Chocolatey package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chocolatey-package
+          path: dist/*.nupkg
+
+      - name: Push to Chocolatey Community Repository
+        if: false # Disabled for now. Enable when ready to publish publicly.
+        run: |
+          $nupkgFile = (Get-ChildItem -Path "dist\*.nupkg").FullName
+          choco push $nupkgFile --source https://push.chocolatey.org/ --api-key ${{ secrets.CHOCO_API_KEY }}
+        shell: pwsh
