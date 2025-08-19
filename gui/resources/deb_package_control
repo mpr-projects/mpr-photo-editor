@@ -1,0 +1,8 @@
+Package: mpr-photo-editor
+Version: __VERSION__
+Architecture: amd64
+Maintainer: Michael Prasthofer <hello@mpr-projects.com>
+Description: A node-based photo editor.
+ This is a longer description of the MPR Photo Editor, a cross-platform
+ application for non-destructive, node-based image processing.
+Depends: python3, libgl1, libxcb-cursor0

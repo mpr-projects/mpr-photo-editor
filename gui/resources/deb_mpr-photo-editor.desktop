@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=MPR Photo Editor
+GenericName=Photo Editor
+Comment=A node-based photo editor for full pipeline transparency
+Exec=mpr-photo-editor %F
+Icon=mpr-photo-editor
+Terminal=false
+Type=Application
+Categories=Graphics;2DGraphics;Photography;

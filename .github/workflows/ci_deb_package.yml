@@ -1,0 +1,109 @@
+name: Package for Debian
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    name: Build .deb Package
+    runs-on: ubuntu-latest
+    env:
+      PIP_CACHE_DIR: .pip_cache
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set custom pip cache dir
+        run: mkdir -p ${{ env.PIP_CACHE_DIR }}
+        shell: bash
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          cache: 'true'
+
+      - name: Install system build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libraw-dev pkg-config dpkg-dev
+
+      - name: Build wheel
+        run: pip wheel . --cache-dir ${{ env.PIP_CACHE_DIR }} --wheel-dir dist --no-deps
+
+      - name: Repair wheel
+        run: |
+          pip install --cache-dir ${{ env.PIP_CACHE_DIR }} auditwheel
+          auditwheel repair dist/*.whl --wheel-dir repaired_wheels
+          rm dist/*.whl
+          mv repaired_wheels/*.whl dist/
+
+      - name: Get release version
+        id: get_version
+        # Strips the 'v' prefix from the tag name (e.g., v0.1.0 -> 0.1.0)
+        # If the trigger is not a release, default to 0.0.0-dev
+        run: |
+          VERSION=${{ github.ref_name }}
+          if [[ "${{ github.event_name }}" != "release" ]]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+
+      - name: Prepare package structure
+        run: |
+          mkdir -p deb_package/DEBIAN
+          mkdir -p deb_package/usr/bin
+          mkdir -p deb_package/usr/share/mpr-photo-editor
+          mkdir -p deb_package/usr/share/applications
+          mkdir -p deb_package/usr/share/icons/hicolor/512x512/apps
+
+      - name: Install application files
+        run: |
+          pip install dist/*.whl PySide6 --target deb_package/usr/share/mpr-photo-editor
+
+      - name: Create launcher script
+        run: |
+          cat << 'EOF' > deb_package/usr/bin/mpr-photo-editor
+          #!/bin/sh          
+          # Set PYTHONPATH and run the GUI module.
+          PYTHONPATH=/usr/share/mpr-photo-editor python3 -m mpr_photo_editor.gui
+          EOF
+          chmod +x deb_package/usr/bin/mpr-photo-editor
+
+      - name: Create .desktop file
+        run: cp gui/resources/deb_mpr-photo-editor.desktop deb_package/usr/share/applications/mpr-photo-editor.desktop
+
+      - name: Copy icon
+        run: cp gui/resources/PhotoEditor.png deb_package/usr/share/icons/hicolor/512x512/apps/mpr-photo-editor.png
+
+      - name: Create DEBIAN/control file
+        run: |
+          # Copy the control file template into the package structure
+          cp gui/resources/deb_package_control deb_package/DEBIAN/control
+          # Replace the __VERSION__ placeholder with the actual version number
+          sed -i "s/__VERSION__/${{ steps.get_version.outputs.version }}/g" deb_package/DEBIAN/control
+
+      - name: Build .deb package
+        run: |
+          dpkg-deb --build deb_package
+          mv deb_package.deb mpr-photo-editor_${{ steps.get_version.outputs.version }}_amd64.deb
+
+      - name: Upload .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpr-photo-editor-deb
+          path: mpr-photo-editor_*.deb
